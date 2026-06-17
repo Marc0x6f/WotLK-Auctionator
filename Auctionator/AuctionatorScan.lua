@@ -1217,19 +1217,14 @@ function Atr_FullScanAnalyze()
 				end
 
 				gAtr_ScanDB[name] = newprice;
-                if #gAtr_MeanDB[name] < 15 then
-                    table.insert(gAtr_MeanDB[name], newprice)
-                else
-                    table.remove(gAtr_MeanDB[name], math.random(1, #gAtr_MeanDB[name]))
-                    table.insert(gAtr_MeanDB[name], newprice)
+                -- maintain a sliding window of the last 15 scan prices (insertion order)
+                table.insert(gAtr_MeanDB[name], newprice)
+                if #gAtr_MeanDB[name] > 15 then
+                    table.remove(gAtr_MeanDB[name], 1)   -- drop the oldest price
                 end
 			end
 		end
 	end
-    
-    for name in pairs(gAtr_MeanDB) do
-        table.sort(gAtr_MeanDB[name])
-    end
 
 	gScanDetails.numBatchAuctions		= numBatchAuctions;
 	gScanDetails.totalItems				= totalItems;

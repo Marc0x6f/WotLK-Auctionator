@@ -251,8 +251,13 @@ function Atr_GetMeanPrice (item)  -- itemName or itemID
 	end
 
 	if (gAtr_MeanDB and gAtr_MeanDB[itemName] and #gAtr_MeanDB[itemName] > 0) then
-        local median = nil
-        if #gAtr_MeanDB[itemName] %2 == 0 then median = (gAtr_MeanDB[itemName][#gAtr_MeanDB[itemName]/2] + gAtr_MeanDB[itemName][#gAtr_MeanDB[itemName]/2+1]) / 2 else median = gAtr_MeanDB[itemName][math.ceil(#gAtr_MeanDB[itemName]/2)] end
+        -- copy and sort at read time (the stored window is in insertion order)
+        local sorted = {};
+        for i = 1, #gAtr_MeanDB[itemName] do sorted[i] = gAtr_MeanDB[itemName][i]; end
+        table.sort(sorted);
+        local n = #sorted;
+        local median;
+        if n % 2 == 0 then median = (sorted[n/2] + sorted[n/2+1]) / 2 else median = sorted[math.ceil(n/2)] end
         return math.floor(median)
 	end
 	
