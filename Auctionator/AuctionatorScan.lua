@@ -1046,7 +1046,8 @@ function Atr_FullScanStart()
 	
 	local canQuery,canQueryAll = CanSendAuctionQuery();
 	
-	if (canQueryAll or gAtr_FullScanIsSlowScan) then
+	-- getAll cooldown gate removed: always attempt the full scan immediately
+	if (true or canQueryAll or gAtr_FullScanIsSlowScan) then
 	
 		Atr_FullScanStatus:SetText (ZT("Scanning").."...");
 		Atr_FullScanStartButton:Disable();
@@ -1323,7 +1324,8 @@ function Atr_UpdateFullScanFrame()
 
 	local canQuery,canQueryAll = CanSendAuctionQuery();
 
-	if (canQueryAll) then
+	-- getAll cooldown gate removed: keep the Full Scan button always enabled
+	if (true or canQueryAll) then
 		Atr_FullScanStatus:SetText ("");
 		Atr_FullScanStartButton:Enable();
 		Atr_FullScanNext:SetText(ZT("Now"));
