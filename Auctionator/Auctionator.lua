@@ -33,6 +33,7 @@ AUCTIONATOR_OPEN_BUY		= 0;	-- obsolete - just needed for migration
 local SELL_TAB		= 1;
 local MORE_TAB		= 2;
 local BUY_TAB 		= 3;
+local BARGAIN_TAB	= 4;
 
 local MODE_LIST_ACTIVE	= 1;
 local MODE_LIST_ALL		= 2;
@@ -679,6 +680,7 @@ function Atr_Init()
 	gShopPane	= Atr_AddSellTab (ZT("Buy"),			BUY_TAB);
 	gSellPane	= Atr_AddSellTab (ZT("Sell"),			SELL_TAB);
 	gMorePane	= Atr_AddSellTab (ZT("More").."...",	MORE_TAB);
+	gBargainPane	= Atr_AddSellTab (ZT("Bargains"),		BARGAIN_TAB);
 
 	Atr_AddMainPanel ();
 
@@ -772,6 +774,7 @@ end
 local _AUCTIONATOR_SELL_TAB_INDEX = 0;
 local _AUCTIONATOR_MORE_TAB_INDEX = 0;
 local _AUCTIONATOR_BUY_TAB_INDEX = 0;
+local _AUCTIONATOR_BARGAIN_TAB_INDEX = 0;
 
 --------------------------------------------------------------------------------
 
@@ -790,6 +793,7 @@ function Atr_FindTabIndex (whichTab)
 				if (tab.auctionatorTab == SELL_TAB)		then _AUCTIONATOR_SELL_TAB_INDEX = i; end;
 				if (tab.auctionatorTab == MORE_TAB)		then _AUCTIONATOR_MORE_TAB_INDEX = i; end;
 				if (tab.auctionatorTab == BUY_TAB)		then _AUCTIONATOR_BUY_TAB_INDEX = i; end;
+				if (tab.auctionatorTab == BARGAIN_TAB)	then _AUCTIONATOR_BARGAIN_TAB_INDEX = i; end;
 			end
 
 			i = i + 1;
@@ -799,6 +803,7 @@ function Atr_FindTabIndex (whichTab)
 	if (whichTab == SELL_TAB)	then return _AUCTIONATOR_SELL_TAB_INDEX ; end;
 	if (whichTab == MORE_TAB)	then return _AUCTIONATOR_MORE_TAB_INDEX; end;
 	if (whichTab == BUY_TAB)	then return _AUCTIONATOR_BUY_TAB_INDEX; end;
+	if (whichTab == BARGAIN_TAB)	then return _AUCTIONATOR_BARGAIN_TAB_INDEX; end;
 
 	return 0;
 end
@@ -883,10 +888,12 @@ function Atr_AuctionFrameTab_OnClick (self, index, down)
 		if (index == Atr_FindTabIndex(SELL_TAB))	then gCurrentPane = gSellPane; end;
 		if (index == Atr_FindTabIndex(BUY_TAB))		then gCurrentPane = gShopPane; end;
 		if (index == Atr_FindTabIndex(MORE_TAB))	then gCurrentPane = gMorePane; end;
+		if (index == Atr_FindTabIndex(BARGAIN_TAB))	then gCurrentPane = gBargainPane; end;
 
 		if (index == Atr_FindTabIndex(SELL_TAB))	then AuctionatorTitle:SetText ("Auctionator - "..ZT("Sell"));			end;
 		if (index == Atr_FindTabIndex(BUY_TAB))		then AuctionatorTitle:SetText ("Auctionator - "..ZT("Buy"));			end;
 		if (index == Atr_FindTabIndex(MORE_TAB))	then AuctionatorTitle:SetText ("Auctionator - "..ZT("More").."...");	end;
+		if (index == Atr_FindTabIndex(BARGAIN_TAB))	then AuctionatorTitle:SetText ("Auctionator - "..ZT("Bargains"));	end;
 
 		Atr_ClearHlist();
 		Atr_SellControls:Hide();
@@ -908,6 +915,8 @@ function Atr_AuctionFrameTab_OnClick (self, index, down)
 		
 		if (index == Atr_FindTabIndex(SELL_TAB)) then
 			Atr_SellControls:Show();
+		elseif (index == Atr_FindTabIndex(BARGAIN_TAB)) then
+			-- bargains render into the main scroll list; no extra controls needed
 		else
 			Atr_Hlist:Show();
 			Atr_Hlist_ScrollFrame:Show();
@@ -1848,6 +1857,12 @@ end
 
 -----------------------------------------
 
+function Atr_ShowingBargains ()
+	return Atr_IsTabSelected (BARGAIN_TAB);
+end
+
+-----------------------------------------
+
 function Atr_ShowingSearchSummary ()
 
 	if (gCurrentPane.activeSearch and gCurrentPane.activeSearch.searchText ~= "" and gCurrentPane:IsScanEmpty() and gCurrentPane.activeSearch:NumScans() > 0) then
@@ -2407,6 +2422,13 @@ function Atr_UpdateUI ()
 
 		gCurrentPane.UINeedsUpdate = false;
 
+		if (Atr_ShowingBargains()) then
+			Atr_ShowBargains();
+			Atr_ListTabs:Hide();
+			Atr_HideElems (recommendElements);
+			return;
+		end
+
 		if (Atr_ShowingSearchSummary()) then
 			Atr_ShowSearchSummary();
 		elseif (gCurrentPane:ShowCurrent()) then
@@ -2812,7 +2834,9 @@ end
 
 function Atr_RedisplayAuctions ()
 
-	if (Atr_ShowingSearchSummary()) then
+	if (Atr_ShowingBargains()) then
+		Atr_ShowBargains();
+	elseif (Atr_ShowingSearchSummary()) then
 		Atr_ShowSearchSummary();
 	elseif (Atr_ShowingCurrentAuctions()) then
 		Atr_ShowCurrentAuctions();
@@ -3287,11 +3311,35 @@ end
 
 -----------------------------------------
 
+function Atr_BargainOnClick (entryIndex)
+
+	local b = gBargainList[entryIndex];
+	if (not b) then return; end
+
+	gBargainSelIndex = entryIndex;
+
+	-- jump to the Buy tab and run an exact search so you can buy the cheapest listing
+	Atr_SelectPane (BUY_TAB);
+	Atr_Search_Box:SetText (b.name);
+	gShopPane:DoSearch (b.name, true);
+	Atr_Process_Historydata();
+	gShopPane.UINeedsUpdate = true;
+
+	PlaySound ("igMainMenuOptionCheckBoxOn");
+end
+
+-----------------------------------------
+
 function Atr_EntryOnClick(entry)
 
 	Atr_Clear_Owner_Item_Indices();
 
 	local entryIndex = entry:GetID();
+
+	if (Atr_ShowingBargains()) then
+		Atr_BargainOnClick (entryIndex);
+		return;
+	end
 
 	if     (Atr_ShowingSearchSummary()) 	then	
 	elseif (Atr_ShowingCurrentAuctions())	then		gCurrentPane.currIndex = entryIndex;
@@ -3819,7 +3867,7 @@ function Atr_IsTabSelected(whichTab)
 	end
 
 	if (not whichTab) then
-		return (Atr_IsTabSelected(SELL_TAB) or Atr_IsTabSelected(MORE_TAB) or Atr_IsTabSelected(BUY_TAB));
+		return (Atr_IsTabSelected(SELL_TAB) or Atr_IsTabSelected(MORE_TAB) or Atr_IsTabSelected(BUY_TAB) or Atr_IsTabSelected(BARGAIN_TAB));
 	end
 
 	return (PanelTemplates_GetSelectedTab (AuctionFrame) == Atr_FindTabIndex(whichTab));
@@ -3829,7 +3877,7 @@ end
 
 function Atr_IsAuctionatorTab (tabIndex)
 
-	if (tabIndex == Atr_FindTabIndex(SELL_TAB) or tabIndex == Atr_FindTabIndex(MORE_TAB) or tabIndex == Atr_FindTabIndex(BUY_TAB) ) then
+	if (tabIndex == Atr_FindTabIndex(SELL_TAB) or tabIndex == Atr_FindTabIndex(MORE_TAB) or tabIndex == Atr_FindTabIndex(BUY_TAB) or tabIndex == Atr_FindTabIndex(BARGAIN_TAB) ) then
 
 		return true;
 

@@ -1234,7 +1234,9 @@ function Atr_FullScanAnalyze()
 	gScanDetails.gNumUpdated			= gNumUpdated;
 
 
-	if (Atr_PrintBargains and Atr_CheckForBargain and numBatchAuctions > 0) then
+	if (Atr_CheckForBargain and numBatchAuctions > 0) then
+
+		Atr_ResetBargains();
 
 		for x = 1, numBatchAuctions do
 			Atr_CheckForBargain (x);
