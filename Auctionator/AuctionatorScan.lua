@@ -1153,31 +1153,45 @@ function Atr_FullScanAnalyze()
 
 	local lowprices = {};
 	local x;
-	
+
 	local qualities = {};
-	
+
+	-- bargain ("sniping") detection is folded into this single pass so a full
+	-- scan doesn't pay for a second walk of the whole auction list
+	local checkBargain = Atr_CheckForBargain;
+	local getMedian    = Atr_GetScanMedian;
+	if (Atr_ResetBargains) then Atr_ResetBargains(); end
+
 	if (numBatchAuctions > 0) then
 
 		for x = 1, numBatchAuctions do
 
-			local name, texture, count, quality, canUse, level, minBid, minIncrement, buyoutPrice = GetAuctionItemInfo("list", x);
-			
+			local name, texture, count, quality, canUse, level, minBid, minIncrement, buyoutPrice, bidAmount, highBidder, owner = GetAuctionItemInfo("list", x);
+
 			if (name ~= nil and buyoutPrice ~= nil) then
-            
+
                 if gAtr_MeanDB[name] == nil then
                     gAtr_MeanDB[name] = {};
                 end
-            	
+
                 qualities[name] = quality;
-			
+
 				local itemPrice = math.floor (buyoutPrice / count);
-			
+
 				if (itemPrice > 0) then
 					if (not lowprices[name]) then
 						lowprices[name] = {BIGNUM,BIGNUM,BIGNUM};		-- one extra for later
 					end
-					
+
 					Atr_AddToLowPrices (lowprices[name], itemPrice);
+
+					-- compare this listing against the item's historical median
+					if (checkBargain) then
+						local median = getMedian (name);
+						if (median > 0) then
+							checkBargain (x, name, texture, count, quality, itemPrice, median, owner);
+						end
+					end
 				end
 			end
 
@@ -1234,12 +1248,7 @@ function Atr_FullScanAnalyze()
 	gScanDetails.gNumUpdated			= gNumUpdated;
 
 
-	if (Atr_PrintBargains and Atr_CheckForBargain and numBatchAuctions > 0) then
-
-		for x = 1, numBatchAuctions do
-			Atr_CheckForBargain (x);
-		end
-		
+	if (Atr_PrintBargains) then
 		Atr_PrintBargains();
 	end
 	
