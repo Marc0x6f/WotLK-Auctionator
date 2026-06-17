@@ -1457,6 +1457,11 @@ function Atr_OnAuctionUpdate (...)
 		return;
 	end
 
+	if (gAtr_FullScanState == ATR_FS_SLOW) then
+		Atr_SlowScanPageReady();
+		return;
+	end
+
 	if (not Atr_IsTabSelected()) then
 		Atr_ClearScanCache();		-- if not our tab, we have no idea what happened so must flush all caches
 		return;

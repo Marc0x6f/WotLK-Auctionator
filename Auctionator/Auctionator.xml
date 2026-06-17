@@ -1230,18 +1230,15 @@
 				</Scripts>
 			</Button>
 
-<!--
-			<CheckButton name="Atr_FullScan_Slow" inherits="UICheckButtonTemplate">
-				<Anchors><Anchor point="TOPLEFT" relativeTo="Atr_FullScanStartButton" relativePoint="BOTTOMLEFT"><Offset><AbsDimension x="0" y="-5"/></Offset></Anchor></Anchors>
-				<Layers>
-					<Layer level="BACKGROUND">
-						<FontString inherits="GameFontHighlightSmall" text="Slow Scan">
-							<Anchors><Anchor point="LEFT" relativePoint="RIGHT" relativeTo="$parent"><Offset><AbsDimension x="4" y="1"/></Offset></Anchor></Anchors>
-						</FontString>
-					</Layer>
-				</Layers>
-			</CheckButton>
--->
+			<Button name="Atr_FullScanSlowButton" inherits="UIPanelButtonTemplate" text="Slow Scan">
+				<Size><AbsDimension x="120" y="22"/></Size>
+				<Anchors><Anchor point="TOP" relativeTo="Atr_FullScanStartButton" relativePoint="BOTTOM"><Offset><AbsDimension x="0" y="-4"/></Offset></Anchor></Anchors>
+				<Scripts>
+					<OnClick>
+						Atr_SlowScanStart();
+					</OnClick>
+				</Scripts>
+			</Button>
 
 			<SimpleHTML name="Atr_FullScanHTML">
 				<Size><AbsDimension x="405" y="300" /></Size>		
