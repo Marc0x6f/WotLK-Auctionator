@@ -13,9 +13,11 @@ local zc = addonTable.zc;
 gBargainList     = {};		-- one entry per cheap auction found in the last full scan
 gBargainSelIndex = 0;		-- highlighted row in the Bargains tab
 
-local DEFAULT_PCT = 70;		-- a bargain is an auction priced at or below this % of the median
+local DEFAULT_PCT       = 70;		-- a bargain is an auction priced at or below this % of the median
+local DEFAULT_MINPROFIT = 10000;	-- ignore bargains worth less than this much total profit (1g)
 
 local gMedianCache = {};	-- name -> median, computed once per item during a scan (0 = no history)
+local playerName   = nil;	-- captured at the start of each scan, to skip your own auctions
 
 -----------------------------------------
 
@@ -32,10 +34,24 @@ end
 
 -----------------------------------------
 
+function Atr_BargainMinProfit ()		-- minimum total profit (in copper) for a bargain to be listed
+
+	local n = tonumber (AUCTIONATOR_BARGAIN_MINPROFIT);
+
+	if (n and n >= 0) then
+		return math.floor (n);
+	end
+
+	return DEFAULT_MINPROFIT;
+end
+
+-----------------------------------------
+
 function Atr_ResetBargains ()
 
 	gBargainList     = {};
 	gBargainSelIndex = 0;
+	playerName       = UnitName ("player");
 	wipe (gMedianCache);
 end
 
@@ -77,7 +93,7 @@ end
 -- All the per-auction data is passed in (already read by the caller) so we
 -- don't re-query the API or re-walk the auction list a second time.
 
-function Atr_CheckForBargain (x, name, texture, count, quality, perItem, median)
+function Atr_CheckForBargain (x, name, texture, count, quality, perItem, median, owner)
 
 	if (median == nil or median <= 0) then
 		return;		-- no price history yet for this item
@@ -87,20 +103,31 @@ function Atr_CheckForBargain (x, name, texture, count, quality, perItem, median)
 		return;		-- bid-only / invalid; can't be insta-flipped
 	end
 
-	if (perItem <= median * Atr_BargainThreshold() / 100) then
-
-		tinsert (gBargainList, {
-			name		= name,
-			link		= GetAuctionItemLink ("list", x),
-			texture		= texture,
-			quality		= quality or 1,
-			count		= count,
-			perItem		= perItem,						-- buyout per single item
-			market		= median,						-- median price per single item
-			profit		= (median - perItem) * count,	-- gross profit if you flip the whole stack
-			pct			= math.floor (perItem * 100 / median),
-		});
+	if (owner ~= nil and owner == playerName) then
+		return;		-- don't "snipe" your own auctions
 	end
+
+	if (perItem > median * Atr_BargainThreshold() / 100) then
+		return;		-- not cheap enough
+	end
+
+	local profit = (median - perItem) * count;		-- gross profit if you flip the whole stack
+
+	if (profit < Atr_BargainMinProfit()) then
+		return;		-- not enough money in it to bother
+	end
+
+	tinsert (gBargainList, {
+		name		= name,
+		link		= GetAuctionItemLink ("list", x),
+		texture		= texture,
+		quality		= quality or 1,
+		count		= count,
+		perItem		= perItem,		-- buyout per single item
+		market		= median,		-- median price per single item
+		profit		= profit,
+		pct			= math.floor (perItem * 100 / median),
+	});
 end
 
 -----------------------------------------
@@ -144,7 +171,7 @@ function Atr_ShowBargains ()
 
 	Atr_Col1_Heading:SetText (ZT("Item Price"));
 	Atr_Col3_Heading:SetText (ZT("Bargains"));
-	Atr_Col4_Heading:SetText (ZT("Auction median"));
+	Atr_Col4_Heading:SetText (ZT("Profit"));
 
 	if (numrows == 0) then
 		Atr_SetMessage (ZT("Run a Full Scan to find items selling below the median price."));
@@ -207,9 +234,9 @@ function Atr_ShowBargains ()
 			itemtext:Hide();
 			MoneyFrame_Update (tag, b.perItem);
 
-			-- column 4: median price per item + discount
+			-- column 4: total profit if flipped + per-item discount vs median
 			stacktext:SetTextColor (0.1, 1.0, 0.1);
-			stacktext:SetText (zc.priceToString (b.market).."  (-"..(100 - b.pct).."%)");
+			stacktext:SetText ("+"..zc.priceToString (b.profit).."   (-"..(100 - b.pct).."%)");
 		end
 	end
 
@@ -217,19 +244,35 @@ function Atr_ShowBargains ()
 end
 
 -----------------------------------------
--- /snipe <1-99>   set the bargain threshold (% of median)
+-- /snipe              show current settings
+-- /snipe <1-99>       set the bargain threshold (% of median)
+-- /snipe profit <g>   set the minimum total profit (in gold)
 
 SLASH_ATRSNIPE1 = "/atrsnipe";
 SLASH_ATRSNIPE2 = "/snipe";
 
 SlashCmdList["ATRSNIPE"] = function (msg)
 
+	msg = string.lower (msg or "");
+	msg = string.gsub (msg, "^%s+", "");
+	msg = string.gsub (msg, "%s+$", "");
+
+	local pcmd, pval = string.match (msg, "^(%a+)%s+(%d+)$");
+
+	if (pcmd == "profit" or pcmd == "lucro" or pcmd == "p") then
+		AUCTIONATOR_BARGAIN_MINPROFIT = tonumber (pval) * 10000;		-- gold -> copper
+		zc.msg_atr (string.format (ZT("Minimum bargain profit set to %s"), zc.priceToString (Atr_BargainMinProfit())));
+		return;
+	end
+
 	local n = tonumber (msg);
 
 	if (n and n >= 1 and n <= 99) then
 		AUCTIONATOR_BARGAIN_PCT = math.floor (n);
 		zc.msg_atr (string.format (ZT("Bargain threshold set to %d%% of median"), Atr_BargainThreshold()));
-	else
-		zc.msg_atr (string.format (ZT("Bargain threshold is %d%% of median (use /snipe 1-99 to change)"), Atr_BargainThreshold()));
+		return;
 	end
+
+	zc.msg_atr (string.format (ZT("Bargains: threshold %d%% of median, min profit %s"), Atr_BargainThreshold(), zc.priceToString (Atr_BargainMinProfit())));
+	zc.msg_atr (ZT("Use: /snipe 1-99  or  /snipe profit <gold>"));
 end

@@ -1166,7 +1166,7 @@ function Atr_FullScanAnalyze()
 
 		for x = 1, numBatchAuctions do
 
-			local name, texture, count, quality, canUse, level, minBid, minIncrement, buyoutPrice = GetAuctionItemInfo("list", x);
+			local name, texture, count, quality, canUse, level, minBid, minIncrement, buyoutPrice, bidAmount, highBidder, owner = GetAuctionItemInfo("list", x);
 
 			if (name ~= nil and buyoutPrice ~= nil) then
 
@@ -1189,7 +1189,7 @@ function Atr_FullScanAnalyze()
 					if (checkBargain) then
 						local median = getMedian (name);
 						if (median > 0) then
-							checkBargain (x, name, texture, count, quality, itemPrice, median);
+							checkBargain (x, name, texture, count, quality, itemPrice, median, owner);
 						end
 					end
 				end
