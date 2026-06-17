@@ -15,6 +15,8 @@ gBargainSelIndex = 0;		-- highlighted row in the Bargains tab
 
 local DEFAULT_PCT = 70;		-- a bargain is an auction priced at or below this % of the median
 
+local gMedianCache = {};	-- name -> median, computed once per item during a scan (0 = no history)
+
 -----------------------------------------
 
 function Atr_BargainThreshold ()
@@ -34,38 +36,58 @@ function Atr_ResetBargains ()
 
 	gBargainList     = {};
 	gBargainSelIndex = 0;
+	wipe (gMedianCache);
 end
 
 -----------------------------------------
--- called once per auction during Atr_FullScanAnalyze
+-- Median of an item's stored scan window, computed once per item per scan and
+-- cached.  Returns 0 when there is no price history (so the caller can skip).
+-- Reusing this avoids allocating/sorting a fresh table for every single
+-- auction in a full scan (which can be tens of thousands).
 
-function Atr_CheckForBargain (x)
+function Atr_GetScanMedian (name)
 
-	local name, texture, count, quality, canUse, level, minBid, minIncrement, buyoutPrice = GetAuctionItemInfo ("list", x);
-
-	if (name == nil or count == nil or count == 0) then
-		return;
+	local cached = gMedianCache[name];
+	if (cached ~= nil) then
+		return cached;
 	end
 
-	if (buyoutPrice == nil or buyoutPrice == 0) then
-		return;		-- bid-only auctions can't be insta-flipped
+	local median = 0;
+	local win    = gAtr_MeanDB and gAtr_MeanDB[name];
+
+	if (win and #win > 0) then
+		local sorted = {};
+		for i = 1, #win do sorted[i] = win[i]; end
+		table.sort (sorted);
+
+		local n = #sorted;
+		if (n % 2 == 0) then
+			median = math.floor ((sorted[n/2] + sorted[n/2 + 1]) / 2);
+		else
+			median = sorted[math.ceil (n/2)];
+		end
 	end
 
-	local perItem = math.floor (buyoutPrice / count);
+	gMedianCache[name] = median;
+	return median;
+end
 
-	if (perItem <= 0) then
-		return;
-	end
+-----------------------------------------
+-- Called once per auction from the main loop of Atr_FullScanAnalyze.
+-- All the per-auction data is passed in (already read by the caller) so we
+-- don't re-query the API or re-walk the auction list a second time.
 
-	local market = Atr_GetMeanPrice (name);		-- median of the last 15 scans
+function Atr_CheckForBargain (x, name, texture, count, quality, perItem, median)
 
-	if (market == nil or market <= 0) then
+	if (median == nil or median <= 0) then
 		return;		-- no price history yet for this item
 	end
 
-	local threshold = market * Atr_BargainThreshold() / 100;
+	if (perItem == nil or perItem <= 0) then
+		return;		-- bid-only / invalid; can't be insta-flipped
+	end
 
-	if (perItem <= threshold) then
+	if (perItem <= median * Atr_BargainThreshold() / 100) then
 
 		tinsert (gBargainList, {
 			name		= name,
@@ -73,11 +95,10 @@ function Atr_CheckForBargain (x)
 			texture		= texture,
 			quality		= quality or 1,
 			count		= count,
-			buyoutPrice	= buyoutPrice,					-- total buyout for the whole stack
 			perItem		= perItem,						-- buyout per single item
-			market		= market,						-- median price per single item
-			profit		= (market - perItem) * count,	-- gross profit if you flip the whole stack
-			pct			= math.floor (perItem * 100 / market),
+			market		= median,						-- median price per single item
+			profit		= (median - perItem) * count,	-- gross profit if you flip the whole stack
+			pct			= math.floor (perItem * 100 / median),
 		});
 	end
 end
