@@ -1003,6 +1003,7 @@ ATR_FS_NULL			= 0;
 ATR_FS_STARTED		= 1;
 ATR_FS_ANALYZING	= 2;
 ATR_FS_CLEANING_UP	= 3;
+ATR_FS_SLOW		= 5;
 
 ATR_FSS_NULL		= 0;
 
@@ -1050,6 +1051,7 @@ function Atr_FullScanStart()
 	
 		Atr_FullScanStatus:SetText (ZT("Scanning").."...");
 		Atr_FullScanStartButton:Disable();
+		if (Atr_FullScanSlowButton) then Atr_FullScanSlowButton:Disable(); end
 		Atr_FullScanDone:Disable();
 		
 		gAtr_FullScanStart = time();
@@ -1145,22 +1147,28 @@ function Atr_FullScanAnalyze()
 	gAtr_FullScanState = ATR_FS_ANALYZING;
 
 	Atr_FullScanStatus:SetText (ZT("Processing"));
-	
 
-	local numBatchAuctions, totalAuctions = GetNumAuctionItems("list");
-
-	zc.md ("FULL SCAN:"..numBatchAuctions.." out of  "..totalAuctions)
+	if (Atr_ResetBargains) then Atr_ResetBargains(); end
 
 	local lowprices = {};
-	local x;
-
 	local qualities = {};
 
-	-- bargain ("sniping") detection is folded into this single pass so a full
-	-- scan doesn't pay for a second walk of the whole auction list
+	local numScanned = Atr_FullScan_ProcessPage (lowprices, qualities);
+
+	Atr_FullScan_Finalize (lowprices, qualities, numScanned);
+end
+
+-----------------------------------------
+-- Processes the auctions currently in the "list" results into the lowprices /
+-- qualities accumulators (and runs bargain detection).  Called once for a
+-- getAll scan, or once per page for a slow scan.
+
+function Atr_FullScan_ProcessPage (lowprices, qualities)
+
+	local numBatchAuctions = GetNumAuctionItems("list");
+
 	local checkBargain = Atr_CheckForBargain;
 	local getMedian    = Atr_GetScanMedian;
-	if (Atr_ResetBargains) then Atr_ResetBargains(); end
 
 	if (numBatchAuctions > 0) then
 
@@ -1195,11 +1203,16 @@ function Atr_FullScanAnalyze()
 				end
 			end
 
-			if (x % 100 == 0) then
-				Atr_FullScanStatus:SetText (ZT("Processing").." ("..x..")");
-			end
 		end
 	end
+
+	return numBatchAuctions;
+end
+
+-----------------------------------------
+-- Updates the price DBs from the accumulated lowprices and finishes the scan UI.
+
+function Atr_FullScan_Finalize (lowprices, qualities, numScanned)
 
 	local numEachQual = {0, 0, 0, 0, 0, 0, 0, 0, 0};
 	local totalItems = 0;
@@ -1240,7 +1253,7 @@ function Atr_FullScanAnalyze()
 		end
 	end
 
-	gScanDetails.numBatchAuctions		= numBatchAuctions;
+	gScanDetails.numBatchAuctions		= numScanned;
 	gScanDetails.totalItems				= totalItems;
 	gScanDetails.numEachQual			= numEachQual;
 	gScanDetails.numRemoved				= numRemoved;
@@ -1261,7 +1274,7 @@ function Atr_FullScanAnalyze()
 	Atr_FullScanDone:Enable();
 	Atr_FullScanStatus:SetText ("");
 	
-	Atr_FSR_scanned_count:SetText	(numBatchAuctions);
+	Atr_FSR_scanned_count:SetText	(numScanned);
 	Atr_FSR_added_count:SetText		(gNumAdded);
 	Atr_FSR_updated_count:SetText	(gNumUpdated);
 	Atr_FSR_ignored_count:SetText	(totalItems - (gNumAdded + gNumUpdated));
@@ -1279,6 +1292,119 @@ function Atr_FullScanAnalyze()
 	
 	lowprices = {};
 	collectgarbage ("collect");
+end
+
+-----------------------------------------
+-- SLOW SCAN: pages through the whole auction house with normal queries
+-- (subject only to the short query throttle, not the 15-minute getAll
+-- cooldown).  Much slower than a getAll, but usable whenever the server
+-- enforces the getAll cooldown.  Reuses AtrQuery for robust paging.
+
+local gSlowScan = nil;
+
+-----------------------------------------
+
+function Atr_SlowScanStart ()
+
+	if (gAtr_FullScanState ~= ATR_FS_NULL) then
+		return;					-- a scan is already running
+	end
+
+	gAtr_FullScanStart	= time();
+	gAtr_FullScanDur	= nil;
+	gNumAdded			= 0;
+	gNumUpdated			= 0;
+
+	if (Atr_ResetBargains) then Atr_ResetBargains(); end
+
+	gSlowScan = {
+		query			= Atr_NewQuery(),
+		current_page	= 0,
+		processing_state= KM_PREQUERY,
+		lowprices		= {},
+		qualities		= {},
+		numScanned		= 0,
+	};
+
+	SortAuctionClearSort ("list");
+
+	gAtr_FullScanState = ATR_FS_SLOW;
+
+	Atr_FullScanStartButton:Disable();
+	if (Atr_FullScanSlowButton) then Atr_FullScanSlowButton:Disable(); end
+	Atr_FullScanDone:Disable();
+
+	Atr_FullScanStatus:SetText (ZT("Scanning").."...");
+end
+
+-----------------------------------------
+-- driven ~5x/sec from Atr_FullScanFrameIdle: sends the next page query
+-- whenever the query throttle allows.
+
+function Atr_SlowScanTick ()
+
+	if (gSlowScan == nil) then return; end
+
+	if (not AuctionFrame or not AuctionFrame:IsShown()) then
+		Atr_SlowScanAbort();
+		return;
+	end
+
+	if (gSlowScan.processing_state == KM_PREQUERY and CanSendAuctionQuery()) then
+
+		QueryAuctionItems ("", nil, nil, nil, 0, 0, gSlowScan.current_page, nil, nil);
+
+		gSlowScan.processing_state	= KM_POSTQUERY;
+		gSlowScan.current_page		= gSlowScan.current_page + 1;
+
+		gAtr_FullScanDur = time() - gAtr_FullScanStart;
+		Atr_FullScanStatus:SetText (string.format (ZT("Scanning auctions: page %d"), gSlowScan.current_page));
+	end
+end
+
+-----------------------------------------
+-- driven from Atr_OnAuctionUpdate when a queried page has arrived.
+
+function Atr_SlowScanPageReady ()
+
+	if (gSlowScan == nil or gSlowScan.processing_state ~= KM_POSTQUERY) then
+		return;
+	end
+
+	if (gSlowScan.query:CheckForDuplicatePage (gSlowScan.current_page)) then
+		gSlowScan.current_page		= gSlowScan.current_page - 1;	-- stale data, requery
+		gSlowScan.processing_state	= KM_PREQUERY;
+		return;
+	end
+
+	local numBatchAuctions = Atr_FullScan_ProcessPage (gSlowScan.lowprices, gSlowScan.qualities);
+	gSlowScan.numScanned = gSlowScan.numScanned + numBatchAuctions;
+
+	local done = (numBatchAuctions < 50)
+			or gSlowScan.query:IsLastPage (gSlowScan.current_page - 1)
+			or (gSlowScan.query.numDupPages > 10);
+
+	if (done) then
+		local lowprices  = gSlowScan.lowprices;
+		local qualities  = gSlowScan.qualities;
+		local numScanned = gSlowScan.numScanned;
+		gSlowScan = nil;
+		Atr_FullScan_Finalize (lowprices, qualities, numScanned);
+	else
+		gSlowScan.processing_state = KM_PREQUERY;
+	end
+end
+
+-----------------------------------------
+
+function Atr_SlowScanAbort ()
+
+	gSlowScan = nil;
+	gAtr_FullScanState = ATR_FS_NULL;
+
+	Atr_FullScanStatus:SetText ("");
+	Atr_FullScanDone:Enable();
+	Atr_UpdateFullScanFrame();
 end
 
 -----------------------------------------
@@ -1314,6 +1440,8 @@ end
 function Atr_UpdateFullScanFrame()
 
 	Atr_FullScanDBsize:SetText (Atr_GetDBsize());
+
+	if (Atr_FullScanSlowButton) then Atr_FullScanSlowButton:Enable(); end
 	
 	if (AUCTIONATOR_LAST_SCAN_TIME) then
 		Atr_FullScanDBwhen:SetText (date ("%A, %B %d at %I:%M %p", AUCTIONATOR_LAST_SCAN_TIME));
@@ -1363,6 +1491,11 @@ end
 -----------------------------------------
 
 function Atr_FullScanFrameIdle()
+
+	if (gAtr_FullScanState == ATR_FS_SLOW) then
+		Atr_SlowScanTick();
+		return;
+	end
 
 	if (gAtr_FullScanState == ATR_FS_STARTED) then
 
