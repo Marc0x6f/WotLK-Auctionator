@@ -422,6 +422,15 @@ local function Atr_SlashCmdFunction(msg)
 			end
 		end
 	
+	elseif (cmd == "round") then
+		AUCTIONATOR_NICE_PRICES = not AUCTIONATOR_NICE_PRICES;
+		if (AUCTIONATOR_NICE_PRICES) then
+			zc.msg_atr (ZT("Nice price rounding: ON"));
+		else
+			zc.msg_atr (ZT("Nice price rounding: OFF"));
+		end
+		if (gCurrentPane) then gCurrentPane.UINeedsUpdate = true; end
+
 	elseif (cmd == "locale") then
 		Atr_PickLocalizationTable (param1u);
 
@@ -1989,6 +1998,10 @@ function Atr_UpdateRecommendation (updatePrices)
 		if (not basedata.yours and not basedata.altname) then
 			new_Item_BuyoutPrice = Atr_CalcUndercutPrice (new_Item_BuyoutPrice);
 		end
+	end
+
+	if (AUCTIONATOR_NICE_PRICES and new_Item_BuyoutPrice) then
+		new_Item_BuyoutPrice = Atr_NicePrice (new_Item_BuyoutPrice);
 	end
 
 	if (new_Item_BuyoutPrice == nil) then
@@ -4392,6 +4405,37 @@ function Atr_SetUINeedsUpdate ()			-- so other modules can easily set
 	gCurrentPane.UINeedsUpdate = true;
 end
 
+
+-----------------------------------------
+
+-- Appraiser-style "nice" price: rounds a buyout DOWN to a clean value so
+-- listings read as 50g instead of 49g87s63c.  Rounding down keeps us at or
+-- below the undercut price, so we stay competitive.
+function Atr_NicePrice (copper)
+
+	if (copper == nil or copper <= 0) then
+		return copper;
+	end
+
+	local g = 10000;
+	local s = 100;
+
+	local step;
+	if     (copper >= 200 * g) then step = 10 * g;
+	elseif (copper >=  20 * g) then step =      g;
+	elseif (copper >=       g) then step = 10 * s;
+	elseif (copper >=       s) then step =      s;
+	else                            return copper;
+	end
+
+	local rounded = math.floor (copper / step) * step;
+
+	if (rounded <= 0) then
+		return copper;
+	end
+
+	return rounded;
+end
 
 -----------------------------------------
 
