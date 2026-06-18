@@ -1462,6 +1462,10 @@ function Atr_OnAuctionUpdate (...)
 		return;
 	end
 
+	if (Atr_LiveSnipeActive and Atr_LiveSnipeActive()) then
+		if (Atr_LiveSnipePageReady()) then return; end
+	end
+
 	if (not Atr_IsTabSelected()) then
 		Atr_ClearScanCache();		-- if not our tab, we have no idea what happened so must flush all caches
 		return;
@@ -2299,6 +2303,10 @@ function Atr_Idle(self, elapsed)
 
 	if (gAtr_FullScanState ~= ATR_FS_NULL) then
 		Atr_FullScanFrameIdle();
+	end
+
+	if (Atr_LiveSnipeActive and Atr_LiveSnipeActive()) then
+		Atr_LiveSnipeTick();
 	end
 	
 	if (verCheckMsgState == 0) then

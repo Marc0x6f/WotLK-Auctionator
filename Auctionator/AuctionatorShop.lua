@@ -11,6 +11,10 @@ local SLITEMS_NUM_LINES = 15;
 
 local gCurrentSList;
 
+function Atr_GetCurrentSList ()
+	return gCurrentSList;
+end
+
 -----------------------------------------
 
 function Atr_ShoppingListsInit ()
