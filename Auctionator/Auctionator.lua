@@ -422,6 +422,18 @@ local function Atr_SlashCmdFunction(msg)
 			end
 		end
 	
+	elseif (cmd == "round") then
+		AUCTIONATOR_NICE_PRICES = not AUCTIONATOR_NICE_PRICES;
+		if (AUCTIONATOR_NICE_PRICES) then
+			zc.msg_atr (ZT("Nice price rounding: ON"));
+		else
+			zc.msg_atr (ZT("Nice price rounding: OFF"));
+		end
+		if (gCurrentPane) then gCurrentPane.UINeedsUpdate = true; end
+
+	elseif (cmd == "items") then
+		Atr_ToggleSellList();
+
 	elseif (cmd == "locale") then
 		Atr_PickLocalizationTable (param1u);
 
@@ -847,6 +859,7 @@ function Atr_AuctionFrameTab_OnClick (self, index, down)
 	_G["Atr_Main_Panel"]:Hide();
 
 	gBuyState = ATR_BUY_NULL;			-- just in case
+	gShowSellList = false;				-- leave the My Items view on any tab switch
 	gItemPostingInProgress = false;		-- just in case
 	
 	auctionator_orig_AuctionFrameTab_OnClick (self, index, down);
@@ -1462,6 +1475,10 @@ function Atr_OnAuctionUpdate (...)
 		return;
 	end
 
+	if (Atr_LiveSnipeActive and Atr_LiveSnipeActive()) then
+		if (Atr_LiveSnipePageReady()) then return; end
+	end
+
 	if (not Atr_IsTabSelected()) then
 		Atr_ClearScanCache();		-- if not our tab, we have no idea what happened so must flush all caches
 		return;
@@ -1867,6 +1884,216 @@ function Atr_ShowingBargains ()
 end
 
 -----------------------------------------
+-- MY ITEMS  (Appraiser-style sell list)
+--
+-- Lists the auctionable items in your bags into the Sell tab's main list
+-- whenever the sell slot is empty.  Click one to load it for posting; after
+-- you post, the slot empties and the list reappears for rapid sequential
+-- selling.  Toggle with "/atr items".
+
+gShowSellList = false;
+gSellList     = {};
+
+-----------------------------------------
+
+function Atr_ShowingSellList ()
+	return (gShowSellList and Atr_IsTabSelected (SELL_TAB) and GetAuctionSellItemInfo() == nil);
+end
+
+-----------------------------------------
+
+local function Atr_ItemSellable (bag, slot)		-- false for soulbound / conjured items
+
+	AtrScanningTooltip:ClearLines();
+	AtrScanningTooltip:SetBagItem (bag, slot);
+
+	local n = AtrScanningTooltip:NumLines();
+	if (n > 8) then n = 8; end
+
+	for i = 2, n do
+		local fs = _G["AtrScanningTooltipTextLeft"..i];
+		local t  = fs and fs:GetText();
+		if (t and (t == ITEM_SOULBOUND or t == ITEM_CONJURED)) then
+			return false;
+		end
+	end
+
+	return true;
+end
+
+-----------------------------------------
+
+function Atr_BuildSellList ()
+
+	gSellList = {};
+
+	for bag = 0, NUM_BAG_SLOTS do
+
+		local numslots = GetContainerNumSlots (bag);
+
+		for slot = 1, numslots do
+
+			local link = GetContainerItemLink (bag, slot);
+
+			if (link) then
+
+				local texture, count, locked = GetContainerItemInfo (bag, slot);
+
+				if (not locked and Atr_ItemSellable (bag, slot)) then
+
+					local name, _, quality = GetItemInfo (link);
+
+					if (name) then
+						local price = Atr_GetAuctionPrice (name) or 0;
+						local cnt   = count or 1;
+
+						tinsert (gSellList, {
+							name	= name,
+							link	= link,
+							texture	= texture,
+							count	= cnt,
+							quality	= quality or 1,
+							bag		= bag,
+							slot	= slot,
+							price	= price,
+							value	= price * cnt,
+						});
+					end
+				end
+			end
+		end
+	end
+
+	table.sort (gSellList, function (a, b)
+		if (a.value ~= b.value) then return a.value > b.value; end
+		return a.name < b.name;
+	end);
+end
+
+-----------------------------------------
+
+function Atr_ShowSellList ()
+
+	Atr_Col1_Heading_Button:Hide();
+	Atr_Col3_Heading_Button:Hide();
+
+	local numrows = #gSellList;
+
+	Atr_Col1_Heading:Show();
+	Atr_Col3_Heading:Show();
+	Atr_Col4_Heading:Show();
+
+	Atr_Col1_Heading:SetText (ZT("Item Price"));
+	Atr_Col3_Heading:SetText (ZT("My Items"));
+	Atr_Col4_Heading:SetText (ZT("Stack Price"));
+
+	if (numrows == 0) then
+		Atr_SetMessage (ZT("No auctionable items found in your bags."));
+	else
+		Atr_SetMessage ("");
+	end
+
+	local line       = 0;
+	local dataOffset = FauxScrollFrame_GetOffset (AuctionatorScrollFrame);
+
+	FauxScrollFrame_Update (AuctionatorScrollFrame, numrows, 12, 16);
+
+	while (line < 12) do
+
+		dataOffset = dataOffset + 1;
+		line       = line + 1;
+
+		local lineEntry = _G["AuctionatorEntry"..line];
+		lineEntry:SetID (dataOffset);
+		lineEntry.itemLink = nil;
+
+		local it = gSellList[dataOffset];
+
+		if (dataOffset > numrows or not it) then
+			lineEntry:Hide();
+		else
+			local tag       = "AuctionatorEntry"..line.."_PerItem_Price";
+			local mf        = _G[tag];
+			local itemtext  = _G["AuctionatorEntry"..line.."_PerItem_Text"];
+			local text      = _G["AuctionatorEntry"..line.."_EntryText"];
+			local stacktext = _G["AuctionatorEntry"..line.."_StackPrice"];
+
+			itemtext:SetText ("");
+			text:SetText ("");
+			stacktext:SetText ("");
+
+			text:GetParent():SetPoint ("LEFT", 157, 0);
+
+			Atr_SetMFcolor (tag);
+			lineEntry:Show();
+			lineEntry.itemLink = it.link;
+
+			local r, g, b = GetItemQualityColor (it.quality);
+			text:SetTextColor (r, g, b);
+
+			local label = Atr_GetUCIcon (it.name).."  "..it.name;
+			if (it.count > 1) then
+				label = label.."  x"..it.count;
+			end
+			text:SetText (label);
+
+			if (it.price > 0) then
+				mf:Show();
+				itemtext:Hide();
+				MoneyFrame_Update (tag, it.price);
+				if (it.count > 1) then
+					stacktext:SetTextColor (0.8, 0.8, 0.8);
+					stacktext:SetText (zc.priceToString (it.value));
+				end
+			else
+				mf:Hide();
+				itemtext:Show();
+				itemtext:SetText (ZT("no data"));
+			end
+		end
+	end
+
+	Atr_HighlightEntry (0);
+end
+
+-----------------------------------------
+
+function Atr_ToggleSellList ()
+
+	if (gShowSellList) then
+		gShowSellList = false;
+	else
+		if (not Atr_IsTabSelected (SELL_TAB)) then
+			Atr_SelectPane (SELL_TAB);
+		end
+		gShowSellList = true;
+		FauxScrollFrame_SetOffset (AuctionatorScrollFrame, 0);
+	end
+
+	if (gCurrentPane) then gCurrentPane.UINeedsUpdate = true; end
+end
+
+-----------------------------------------
+
+function Atr_SellListOnClick (entryIndex)
+
+	local it = gSellList[entryIndex];
+	if (not it) then return; end
+
+	-- load the item into the sell slot (same as dragging it from the bag)
+	PickupContainerItem (it.bag, it.slot);
+
+	if (GetCursorInfo() == "item") then
+		Atr_ClearAll();
+		Atr_ClickAuctionSellItemButton();
+		ClearCursor();
+	end
+
+	if (gSellPane) then gSellPane.UINeedsUpdate = true; end
+	PlaySound ("igMainMenuOptionCheckBoxOn");
+end
+
+-----------------------------------------
 
 function Atr_ShowingSearchSummary ()
 
@@ -1985,6 +2212,10 @@ function Atr_UpdateRecommendation (updatePrices)
 		if (not basedata.yours and not basedata.altname) then
 			new_Item_BuyoutPrice = Atr_CalcUndercutPrice (new_Item_BuyoutPrice);
 		end
+	end
+
+	if (AUCTIONATOR_NICE_PRICES and new_Item_BuyoutPrice) then
+		new_Item_BuyoutPrice = Atr_NicePrice (new_Item_BuyoutPrice);
 	end
 
 	if (new_Item_BuyoutPrice == nil) then
@@ -2300,6 +2531,10 @@ function Atr_Idle(self, elapsed)
 	if (gAtr_FullScanState ~= ATR_FS_NULL) then
 		Atr_FullScanFrameIdle();
 	end
+
+	if (Atr_LiveSnipeActive and Atr_LiveSnipeActive()) then
+		Atr_LiveSnipeTick();
+	end
 	
 	if (verCheckMsgState == 0) then
 		verCheckMsgState = time();
@@ -2429,6 +2664,14 @@ function Atr_UpdateUI ()
 
 		if (Atr_ShowingBargains()) then
 			Atr_ShowBargains();
+			Atr_ListTabs:Hide();
+			Atr_HideElems (recommendElements);
+			return;
+		end
+
+		if (Atr_ShowingSellList()) then
+			Atr_BuildSellList();
+			Atr_ShowSellList();
 			Atr_ListTabs:Hide();
 			Atr_HideElems (recommendElements);
 			return;
@@ -2841,6 +3084,8 @@ function Atr_RedisplayAuctions ()
 
 	if (Atr_ShowingBargains()) then
 		Atr_ShowBargains();
+	elseif (Atr_ShowingSellList()) then
+		Atr_ShowSellList();
 	elseif (Atr_ShowingSearchSummary()) then
 		Atr_ShowSearchSummary();
 	elseif (Atr_ShowingCurrentAuctions()) then
@@ -3343,6 +3588,11 @@ function Atr_EntryOnClick(entry)
 
 	if (Atr_ShowingBargains()) then
 		Atr_BargainOnClick (entryIndex);
+		return;
+	end
+
+	if (Atr_ShowingSellList()) then
+		Atr_SellListOnClick (entryIndex);
 		return;
 	end
 
@@ -4384,6 +4634,37 @@ function Atr_SetUINeedsUpdate ()			-- so other modules can easily set
 	gCurrentPane.UINeedsUpdate = true;
 end
 
+
+-----------------------------------------
+
+-- Appraiser-style "nice" price: rounds a buyout DOWN to a clean value so
+-- listings read as 50g instead of 49g87s63c.  Rounding down keeps us at or
+-- below the undercut price, so we stay competitive.
+function Atr_NicePrice (copper)
+
+	if (copper == nil or copper <= 0) then
+		return copper;
+	end
+
+	local g = 10000;
+	local s = 100;
+
+	local step;
+	if     (copper >= 200 * g) then step = 10 * g;
+	elseif (copper >=  20 * g) then step =      g;
+	elseif (copper >=       g) then step = 10 * s;
+	elseif (copper >=       s) then step =      s;
+	else                            return copper;
+	end
+
+	local rounded = math.floor (copper / step) * step;
+
+	if (rounded <= 0) then
+		return copper;
+	end
+
+	return rounded;
+end
 
 -----------------------------------------
 
